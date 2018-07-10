@@ -66,7 +66,7 @@ class Requirements(requirements.SuiteRequirements):
 
     @property
     def precision_numerics_retains_significant_digits(self):
-        return exclusions.open()
+        return exclusions.closed()
 
     @property
     def datetime_literals(self):
@@ -291,3 +291,6 @@ class Requirements(requirements.SuiteRequirements):
     def foreign_key_constraint_option_reflection(self):
         return exclusions.open()
 
+    @property
+    def check_constraint_reflection(self):
+        return exclusions.open()

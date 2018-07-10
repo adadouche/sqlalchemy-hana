@@ -12,6 +12,8 @@
 # either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 
+from functools import wraps
+
 from sqlalchemy import sql, types, util
 from sqlalchemy.engine import default, reflection
 from sqlalchemy.sql import compiler
@@ -56,8 +58,8 @@ class HANAStatementCompiler(compiler.SQLCompiler):
             text += "\n LIMIT " + self.process(select._limit_clause, **kwargs)
         if select._offset_clause is not None:
             if select._limit_clause is None:
-                # Dirty Hack but HANA only support OFFSET with LIMIT <integer>
-                text += "\n LIMIT 999999"
+                # 2147384648 is the max. no. of records per result set
+                text += "\n LIMIT 2147384648"
             text += " OFFSET " + self.process(select._offset_clause, **kwargs)
         return text
 
@@ -671,3 +673,27 @@ class HANAHDBCLIDialect(HANABaseDialect):
             if error.errorcode == -10709:
                 return True
         return super(HANAHDBCLIDialect, self).is_disconnect(error, connection, cursor)
+
+
+def _fix_integrity_error(f):
+    """Ensure raising of IntegrityError on unique constraint violations.
+
+    In earlier versions of hdbcli it doesn't raise the hdbcli.dbapi.IntegrityError
+    exception for unique constraint violations. To support also older versions
+    of hdbcli this decorator inspects the raised exception and will rewrite the
+    exception based on HANA's error code.
+    """
+
+    @wraps(f)
+    def wrapper(dialect, *args, **kwargs):
+        try:
+            return f(dialect, *args, **kwargs)
+        except dialect.dbapi.Error as exc:
+            if exc.errorcode == 301 and not isinstance(exc, dialect.dbapi.IntegrityError):
+                raise dialect.dbapi.IntegrityError(exc)
+            raise
+    return wrapper
+
+for method in ('do_execute', 'do_executemany', 'do_execute_no_params'):
+    setattr(HANAHDBCLIDialect, method, _fix_integrity_error(getattr(HANAHDBCLIDialect, method)))
+
